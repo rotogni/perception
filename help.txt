@@ -1,0 +1,9 @@
+compile main.cpp using bash:
+    clang++ main.cpp pose_estimation.cpp visualization.cpp -o main -std=c++17 \
+    -I/opt/homebrew/Cellar/opencv/4.11.0_1/include/opencv4 \
+    -L/opt/homebrew/Cellar/opencv/4.11.0_1/lib \
+    -lopencv_core -lopencv_highgui -lopencv_imgproc -lopencv_imgcodecs \
+    -lopencv_features2d -lopencv_calib3d -lopencv_viz
+run:
+./main
+
