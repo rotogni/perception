@@ -1,0 +1,8 @@
+*.png
+*.nav
+**.jpg
+*.csv
+.DS_Store
+*.txt
+*.log
+*.obs   
