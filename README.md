@@ -1,8 +1,8 @@
-# Stereo Visual Odometry and 3D Reconstruction
+# Stereo Visual Odometry 
 
 This project implements a stereo visual odometry pipeline for estimating the trajectory of a rover and reconstructing a sparse 3D map of the environment using stereo images. The code is designed to work with datasets such as KITTI and Morocco (MADMAX), and leverages OpenCV for computer vision operations.
 
-Screencast real time running on Apple MacBook Pro 13 M2 Max:
+Screencast real time running on Apple MacBook Pro 13" M2 Max:
 
 [![IMAGE ALT TEXT HERE](https://img.youtube.com/vi/s6yd67y4xYk/0.jpg)](https://www.youtube.com/watch?v=s6yd67y4xYk)
 
