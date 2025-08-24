@@ -11,6 +11,14 @@ void Visualization::initializeWindows() {
     if (!is_initialized) {
         viz_window.setBackgroundColor(cv::viz::Color::white());
         viz_window.showWidget("Coordinate System", cv::viz::WCoordinateSystem());
+        // Set initial camera pose: y = -20, looking down (bird's-eye view)
+        cv::Affine3d cam_pose;
+        // Camera at (0, -20, 0), looking at (0, 0, 0), up = (0, 0, 1)
+        cv::Vec3d cam_pos(0.0, -1200.0, 0.0);
+        cv::Vec3d cam_focal(0.0, 0.0, 0.0);
+        cv::Vec3d cam_y_dir(0.0, 0.0, -1.0);
+        cam_pose = cv::viz::makeCameraPose(cam_pos, cam_focal, cam_y_dir);
+        viz_window.setViewerPose(cam_pose);
         is_initialized = true;
     }
 }
@@ -52,25 +60,28 @@ void Visualization::updatePointCloud(const std::vector<cv::Point3f>& points3d,
     cv::Point3f* ptr = points_mat.ptr<cv::Point3f>(0);
     cv::Vec3b* color_ptr = colors.ptr<cv::Vec3b>(0);
 
-    // Find depth range
-    float min_z = std::numeric_limits<float>::max();
-    float max_z = std::numeric_limits<float>::lowest();
-    
-    #pragma omp parallel for reduction(min:min_z) reduction(max:max_z)
-    for (size_t i = 0; i < points3d.size(); i++) {
-        min_z = std::min(min_z, points3d[i].z);
-        max_z = std::max(max_z, points3d[i].z);
+    // Color points based on true depth from camera (last pose in trajectory)
+    cv::Point3f cam_pos(0,0,0);
+    if (!trajectory_points.empty()) {
+        cam_pos = trajectory_points.back();
     }
-
-    // Color points based on depth
-    #pragma omp parallel for
+    // Compute depth for each point
+    std::vector<float> depths(points3d.size());
+    float min_depth = std::numeric_limits<float>::max();
+    float max_depth = std::numeric_limits<float>::lowest();
+    for (size_t i = 0; i < points3d.size(); i++) {
+        depths[i] = cv::norm(points3d[i] - cam_pos);
+        min_depth = std::min(min_depth, depths[i]);
+        max_depth = std::max(max_depth, depths[i]);
+    }
+    // Color points by normalized depth (blue=close, red=far)
     for (size_t i = 0; i < points3d.size(); i++) {
         ptr[i] = points3d[i];
-        float normalized_z = (points3d[i].z - min_z) / (max_z - min_z);
+        float norm_depth = (max_depth > min_depth) ? (depths[i] - min_depth) / (max_depth - min_depth) : 0.0f;
         color_ptr[i] = cv::Vec3b(
-            static_cast<uchar>(255 * (1.0f - normalized_z)),
-            static_cast<uchar>(255 * normalized_z),
-            0);
+            static_cast<uchar>(255 * norm_depth),    // Red (far)
+            static_cast<uchar>(255 * (1.0f - norm_depth)), // Green (close)
+            128); // Constant blue for visibility
     }
 
     // Update point cloud widget

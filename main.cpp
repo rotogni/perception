@@ -171,6 +171,9 @@ int main()
         //{
         //    break;
         //}
+        if (i == 1) {
+            cv::waitKey(0); // Wait indefinitely for the first frame
+        }
     }
     visualizer.cleanup();
     return 0;
