@@ -1,14 +1,7 @@
 #include "visualization.hpp"
 #include <vector>
-
-void Visualization::showGroundTruthTrajectory(const std::vector<cv::Point3f>& gt_trajectory) {
-    if (!gt_trajectory.empty()) {
-        cv::viz::WPolyLine gt_poly(gt_trajectory, cv::viz::Color::green());
-        gt_poly.setRenderingProperty(cv::viz::LINE_WIDTH, 3.0);
-        viz_window.showWidget("GT_Trajectory", gt_poly);
-    }
-}
-#include "visualization.hpp"
+#include <iomanip>
+#include <sstream>
 
 Visualization::Visualization(const std::string& window_name)
     : window_name(window_name),
@@ -20,16 +13,54 @@ Visualization::Visualization(const std::string& window_name)
 void Visualization::initializeWindows() {
     if (!is_initialized) {
         viz_window.setBackgroundColor(cv::viz::Color::white());
-        viz_window.showWidget("Coordinate System", cv::viz::WCoordinateSystem());
-    // Set initial camera pose: y = -20, looking slightly down (not straight down)
-    cv::Affine3d cam_pose;
-    // Camera at (0, -700, -400), looking at (0, 0, 0), up = (0, 0.5, 1.0)
-    cv::Vec3d cam_pos(0.0, -1000.0, 150.0);
-    cv::Vec3d cam_focal(0.0, 0.0, 150.0);
-    cv::Vec3d cam_up(0.0, 0.0, -1.0); // Less downward tilt, more up
-    cam_pose = cv::viz::makeCameraPose(cam_pos, cam_focal, cam_up);
-    viz_window.setViewerPose(cam_pose);
-    is_initialized = true;
+        viz_window.showWidget("Coordinate System", cv::viz::WCoordinateSystem(0.5));
+        
+        // Set initial camera pose for good trajectory view
+        cv::Affine3d cam_pose;
+        cv::Vec3d cam_pos(0.0, -1000.0, 150.0);
+        cv::Vec3d cam_focal(0.0, 0.0, 150.0);
+        cv::Vec3d cam_up(0.0, 0.0, -1.0);
+        cam_pose = cv::viz::makeCameraPose(cam_pos, cam_focal, cam_up);
+        viz_window.setViewerPose(cam_pose);
+        
+        is_initialized = true;
+    }
+}
+
+void Visualization::add2DLegend(cv::Mat& display_image, size_t num_points, size_t num_poses, 
+                               float min_depth, float max_depth) {
+    // Create legend overlay on the image
+    int legend_x = 100;
+    int legend_y = 0;
+    int line_height = 250;
+
+    
+    // Trajectory legend
+    legend_y += line_height;
+    cv::line(display_image, cv::Point(legend_x, legend_y), cv::Point(legend_x + 300, legend_y), 
+             cv::Scalar(0, 255, 0), 30); // Green line
+    cv::putText(display_image, "Ground Truth", cv::Point(legend_x + 400, legend_y + 50), 
+                cv::FONT_HERSHEY_SIMPLEX, 4, cv::Scalar(0, 255, 0), 10);
+    
+    legend_y += line_height;
+    cv::line(display_image, cv::Point(legend_x, legend_y), cv::Point(legend_x + 300, legend_y), 
+             cv::Scalar(0, 0, 255), 30); // Red line
+    cv::putText(display_image, "Estimated", cv::Point(legend_x + 400, legend_y + 50), 
+                cv::FONT_HERSHEY_SIMPLEX, 4, cv::Scalar(0, 0, 255), 10);
+    
+    // Point cloud legend
+    legend_y += line_height;
+    cv::circle(display_image, cv::Point(legend_x + 200, legend_y), 12, cv::Scalar(255, 0, 0), -1); // Blue
+    cv::putText(display_image, "Landmarks", cv::Point(legend_x + 400, legend_y + 50), 
+                cv::FONT_HERSHEY_SIMPLEX, 4, cv::Scalar(255, 0, 0), 10);
+    
+}
+
+void Visualization::showGroundTruthTrajectory(const std::vector<cv::Point3f>& gt_trajectory) {
+    if (!gt_trajectory.empty()) {
+        cv::viz::WPolyLine gt_poly(gt_trajectory, cv::viz::Color::green());
+        gt_poly.setRenderingProperty(cv::viz::LINE_WIDTH, 3.0);
+        viz_window.showWidget("GT_Trajectory", gt_poly);
     }
 }
 
@@ -57,6 +88,20 @@ void Visualization::showStereoMatches(const cv::Mat& left_image,
     cv::pollKey(); // Non-blocking key check
 }
 
+// Add a separate legend window
+void Visualization::showLegendWindow(size_t num_points, size_t num_poses, 
+                                   float min_depth, float max_depth) {
+    // Create a dedicated legend image
+    cv::Mat legend_image = cv::Mat::zeros(1000, 1500, CV_8UC3);
+    legend_image.setTo(cv::Scalar(250, 250, 250)); // Light gray background
+    
+    add2DLegend(legend_image, num_points, num_poses, min_depth, max_depth);
+    
+    cv::namedWindow("Legend", cv::WINDOW_AUTOSIZE);
+    cv::imshow("Legend", legend_image);
+    cv::pollKey();
+}
+
 void Visualization::updatePointCloud(const std::vector<cv::Point3f>& points3d,
                                    const std::vector<cv::Point3f>& trajectory_points) {
     if (points3d.empty()) {
@@ -70,12 +115,13 @@ void Visualization::updatePointCloud(const std::vector<cv::Point3f>& points3d,
     cv::Point3f* ptr = points_mat.ptr<cv::Point3f>(0);
     cv::Vec3b* color_ptr = colors.ptr<cv::Vec3b>(0);
 
-    // Color points based on true depth from camera (last pose in trajectory)
+    // Color points based on depth from current camera position
     cv::Point3f cam_pos(0,0,0);
     if (!trajectory_points.empty()) {
         cam_pos = trajectory_points.back();
     }
-    // Compute depth for each point
+    
+    // Compute depth statistics for coloring
     std::vector<float> depths(points3d.size());
     float min_depth = std::numeric_limits<float>::max();
     float max_depth = std::numeric_limits<float>::lowest();
@@ -84,14 +130,16 @@ void Visualization::updatePointCloud(const std::vector<cv::Point3f>& points3d,
         min_depth = std::min(min_depth, depths[i]);
         max_depth = std::max(max_depth, depths[i]);
     }
+    
     // Color points by normalized depth (blue=close, red=far)
     for (size_t i = 0; i < points3d.size(); i++) {
         ptr[i] = points3d[i];
         float norm_depth = (max_depth > min_depth) ? (depths[i] - min_depth) / (max_depth - min_depth) : 0.0f;
         color_ptr[i] = cv::Vec3b(
-            static_cast<uchar>(255 * norm_depth),    // Red (far)
-            static_cast<uchar>(255 * (1.0f - norm_depth)), // Green (close)
-            128); // Constant blue for visibility
+            static_cast<uchar>(255),           // Red component (far)
+            static_cast<uchar>(0),  // Green component 
+            static_cast<uchar>(0)   // Blue component (close)
+        );
     }
 
     // Update point cloud widget
@@ -100,32 +148,36 @@ void Visualization::updatePointCloud(const std::vector<cv::Point3f>& points3d,
     cloud.setRenderingProperty(cv::viz::REPRESENTATION, cv::viz::REPRESENTATION_POINTS);
     viz_window.showWidget("Point Cloud", cloud);
 
-    // Visualize trajectory if available
+    // Visualize estimated trajectory
     if (!trajectory_points.empty()) {
-        // Create trajectory line
         cv::viz::WPolyLine trajectory_widget(trajectory_points, cv::viz::Color::red());
         trajectory_widget.setRenderingProperty(cv::viz::LINE_WIDTH, 4.0);
         viz_window.showWidget("Trajectory", trajectory_widget);
 
-        // Add trajectory points as spheres (with reduced frequency)
+        // Add trajectory points as spheres (reduced frequency)
         const size_t sphere_spacing = std::max(size_t(1), trajectory_points.size() / 50);
         for (size_t i = 0; i < trajectory_points.size(); i += sphere_spacing) {
             std::string sphere_name = "trajectory_point_" + std::to_string(i/sphere_spacing);
-            cv::viz::WSphere sphere(trajectory_points[i], 0.05, 10, cv::viz::Color::red());
+            cv::viz::WSphere sphere(trajectory_points[i], 0.8, 10, cv::viz::Color::red());
             viz_window.showWidget(sphere_name, sphere);
         }
     }
-
+    
+    // Show 2D legend window
+    showLegendWindow(points3d.size(), trajectory_points.size(), min_depth, max_depth);
+    
     viz_window.spinOnce(1);
 }
+
 
 void Visualization::clearPointCloud() {
     try {
         viz_window.removeWidget("Point Cloud");
         viz_window.removeWidget("Trajectory");
+        viz_window.removeWidget("Dynamic_Stats");
         
-        // Remove any existing trajectory spheres
-        for (size_t i = 0; i < 50; i++) {  // Maximum number of spheres we could have created
+        // Remove trajectory spheres
+        for (size_t i = 0; i < 50; i++) {
             std::string sphere_name = "trajectory_point_" + std::to_string(i);
             try {
                 viz_window.removeWidget(sphere_name);
@@ -134,7 +186,7 @@ void Visualization::clearPointCloud() {
             }
         }
     } catch (...) {
-        // Widget didn't exist, which is fine
+        // Widgets didn't exist
     }
 }
 
