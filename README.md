@@ -4,7 +4,7 @@ This project implements a stereo visual odometry pipeline for estimating the tra
 
 Screencast real time running on Apple MacBook Pro 13" M2 Max:
 
-[![IMAGE ALT TEXT HERE](https://img.youtube.com/vi/s6yd67y4xYk/0.jpg)](https://www.youtube.com/watch?v=s6yd67y4xYk)
+[![IMAGE ALT TEXT HERE](https://img.youtube.com/vi/nvk2orbobzM/0.jpg)](https://www.youtube.com/watch?v=nvk2orbobzM)
 
 ## Overview
 
