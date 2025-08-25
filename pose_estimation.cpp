@@ -1,12 +1,19 @@
 #include "pose_estimation.hpp"
 #include <iostream>
 
+// Forward declaration for PlaceRecoEntry if not in header
+struct PlaceRecoEntry {
+    cv::KeyPoint keypoint;
+    cv::Point3f point3d;
+    cv::Mat descriptor;
+    int frame_idx;
+};
+
 PoseEstimation::PoseEstimation() {
     // Initialize feature detector
     fast_detector = cv::FastFeatureDetector::create();
     fast_detector->setThreshold(40);
     fast_detector->setNonmaxSuppression(true);
-
 
     // Initialize pose as identity
     R = cv::Mat::eye(3, 3, CV_64F);
@@ -14,22 +21,20 @@ PoseEstimation::PoseEstimation() {
     
     // Initialize ORB descriptor for feature matching
     descriptor_extractor = cv::ORB::create(
-        500,     // nfeatures - Increased for better coverage
-        1.3f,     // scaleFactor - Slightly increased for better scale handling
-        12,       // nlevels - More pyramid levels for scale invariance
-        35,       // edgeThreshold - Increased to detect features closer to edges
-        0,        // firstLevel - Keep default
-        4,        // WTA_K - Increased for more robust descriptors
-        cv::ORB::HARRIS_SCORE,  // scoreType - Harris corners are more stable
-        32,       // patchSize - Adjusted for balance
-        25        // fastThreshold - Lowered to detect more features
+        500,     // nfeatures
+        1.3f,    // scaleFactor
+        22,      // nlevels
+        35,      // edgeThreshold
+        0,       // firstLevel
+        4,       // WTA_K
+        cv::ORB::HARRIS_SCORE,
+        32,      // patchSize
+        40       // fastThreshold
     );
     
-    // Initialize matcher with Hamming distance (for binary descriptors like ORB)
+    // Initialize matcher
     matcher = cv::BFMatcher::create(cv::NORM_HAMMING, true);
-    // Create matcher without cross-check for kNN
     knn_matcher = cv::BFMatcher::create(cv::NORM_HAMMING, false);
-    
 }
 
 void PoseEstimation::initialize3D(const cv::Mat& left_image,
@@ -40,7 +45,7 @@ void PoseEstimation::initialize3D(const cv::Mat& left_image,
                                 std::vector<cv::KeyPoint>& left_keypoints,
                                 std::vector<cv::KeyPoint>& right_keypoints,
                                 std::vector<cv::DMatch>& matches,
-                            bool verbose) {
+                                bool verbose) {
     // Detect features in both images
     fast_detector->detect(left_image, left_keypoints);
     fast_detector->detect(right_image, right_keypoints);
@@ -54,21 +59,20 @@ void PoseEstimation::initialize3D(const cv::Mat& left_image,
     if (!left_descriptors.empty() && !right_descriptors.empty()) {
         std::vector<std::vector<cv::DMatch>> knn_matches;
         knn_matcher->knnMatch(left_descriptors, right_descriptors, knn_matches, 2);
-        // Apply Lowe's ratio test with additional epipolar constraint
+        
+        // Apply Lowe's ratio test with epipolar constraint
         const float ratio_thresh = 0.75f;
-        const float max_y_diff = 2.0f;  // Maximum vertical disparity for stereo
+        const float max_y_diff = 2.0f;
         matches.clear();
         matches.reserve(knn_matches.size());
         
         for (const auto& match_pair : knn_matches) {
             if (match_pair.size() < 2) continue;
             
-            const auto& m = match_pair[0];  // Best match
-            const auto& n = match_pair[1];  // Second best match
+            const auto& m = match_pair[0];
+            const auto& n = match_pair[1];
             
-            // Apply ratio test
             if (m.distance < ratio_thresh * n.distance) {
-                // Apply epipolar constraint for stereo
                 float y_diff = std::abs(left_keypoints[m.queryIdx].pt.y - 
                                       right_keypoints[m.trainIdx].pt.y);
                 if (y_diff < max_y_diff) {
@@ -77,7 +81,6 @@ void PoseEstimation::initialize3D(const cv::Mat& left_image,
             }
         }
         
-        // Sort matches by distance
         std::sort(matches.begin(), matches.end(),
                  [](const cv::DMatch& a, const cv::DMatch& b) {
                      return a.distance < b.distance;
@@ -90,7 +93,6 @@ void PoseEstimation::initialize3D(const cv::Mat& left_image,
     left_points.reserve(matches.size());
     right_points.reserve(matches.size());
 
-    // First collect the points
     for (const auto& m : matches) {
         left_points.push_back(left_keypoints[m.queryIdx].pt);
         right_points.push_back(right_keypoints[m.trainIdx].pt);
@@ -106,37 +108,31 @@ void PoseEstimation::initialize3D(const cv::Mat& left_image,
     }
     
     if (matches.size() >= 8) {
-
-        // Get current pose (world->right_camera)
-
         // Create camera matrix K
         cv::Mat K = (cv::Mat_<double>(3,3) <<
             focal_length, 0, principal_point.x,
             0, focal_length, principal_point.y,
             0, 0, 1);
 
-        
-        // Left camera is reference at [I|0]
+        // Left camera projection matrix [I|0]
         cv::Mat P_left = cv::Mat::zeros(3, 4, CV_64F);
         cv::Mat eye = cv::Mat::eye(3, 3, CV_64F);
         eye.copyTo(P_left(cv::Rect(0, 0, 3, 3)));
 
-        // Right camera offset by baseline [I|baseline]
+        // Right camera projection matrix [I|baseline]
         cv::Mat P_right = cv::Mat::zeros(3, 4, CV_64F);
         eye.copyTo(P_right(cv::Rect(0, 0, 3, 3)));
         cv::Mat baseline_vec = (cv::Mat_<double>(3,1) << -baseline, 0, 0);
         baseline_vec.copyTo(P_right(cv::Rect(3, 0, 1, 3)));
 
-        // Apply camera matrix after
         P_left = K * P_left;
         P_right = K * P_right;
                 
         // Triangulate points
         cv::Mat points_4d;
-        cv::triangulatePoints(P_left, P_right, left_points,right_points, points_4d);
+        cv::triangulatePoints(P_left, P_right, left_points, right_points, points_4d);
         
         // Convert homogeneous coordinates to 3D points with filtering
-        // At the start of initialize3D
         points3d.clear();
         points_3d_descriptors.clear();
         points_3d_valid_indices.clear();
@@ -148,17 +144,14 @@ void PoseEstimation::initialize3D(const cv::Mat& left_image,
 
         for (int i = 0; i < points_4d.cols; i++) {
             double w = points_4d.at<float>(3, i);
-            if (std::abs(w) > 1e-10) { // Check for valid homogeneous coordinate
-                // Convert from homogeneous to 3D camera coordinates
+            if (std::abs(w) > 1e-10) {
                 cv::Point3f p_cam(
                     points_4d.at<float>(0, i) / w,
                     points_4d.at<float>(1, i) / w,
                     points_4d.at<float>(2, i) / w
                 );
                 
-                // Basic depth check in camera frame
                 if (p_cam.z > 0 && p_cam.z < 50.0) {
-                    // Transform to world frame
                     cv::Mat p_cam_mat = (cv::Mat_<double>(3,1) << p_cam.x, p_cam.y, p_cam.z);
                     cv::Mat p_world_mat = current_pose.R * p_cam_mat + current_pose.t;
                     
@@ -175,17 +168,11 @@ void PoseEstimation::initialize3D(const cv::Mat& left_image,
             }
         }
 
-        // Create final descriptor matrix with only valid points
-        cv::Mat landmark_desc;
-        if (!points_3d_descriptors.empty()) {
-            cv::vconcat(points_3d_descriptors, landmark_desc);
-        }
-        if(verbose){
-        std::cout << "Triangulation stats:" << std::endl;
-        std::cout << "Matches used: " << matches.size() << std::endl;
-        std::cout << "Points triangulated: " << points3d.size() << std::endl;
-        std::cout << "Descriptors stored: " << landmark_desc.rows << std::endl;
-        std::cout << "Descriptors stored: " << points_3d_descriptors.size() << std::endl;
+        if (verbose) {
+            std::cout << "Triangulation stats:" << std::endl;
+            std::cout << "Matches used: " << matches.size() << std::endl;
+            std::cout << "Points triangulated: " << points3d.size() << std::endl;
+            std::cout << "Descriptors stored: " << points_3d_descriptors.size() << std::endl;
         }
     }
 }
@@ -194,19 +181,18 @@ void PoseEstimation::PnP(const cv::Mat& left_image,
                         std::vector<cv::Point3f>& points3d,
                         std::vector<cv::Mat>& points_3d_descriptors,
                         std::vector<size_t>& points_3d_valid_indices,
-                    bool verbose) {
+                        bool verbose) {
     // Detect and compute features in current frame
     std::vector<cv::KeyPoint> current_keypoints;
     cv::Mat current_descriptors;
-    // Detect features in left images
     fast_detector->detect(left_image, current_keypoints);
-    // Compute descriptors
     descriptor_extractor->compute(left_image, current_keypoints, current_descriptors);
 
     cv::Mat landmark_desc;
-        if (!points_3d_descriptors.empty()) {
-            cv::vconcat(points_3d_descriptors, landmark_desc);
-        }
+    if (!points_3d_descriptors.empty()) {
+        cv::vconcat(points_3d_descriptors, landmark_desc);
+    }
+
     // Match using kNN for Lowe's ratio test
     std::vector<std::vector<cv::DMatch>> knn_matches;
     cv::Ptr<cv::BFMatcher> knn_matcher = cv::BFMatcher::create(cv::NORM_HAMMING, false);
@@ -235,26 +221,22 @@ void PoseEstimation::PnP(const cv::Mat& left_image,
         matched_2d_points.push_back(current_keypoints[match.trainIdx].pt);
     }
 
-    // Early return if not enough matches
-    if (matched_3d_points.size() < 6) {  // Need at least 6 points for P3P + RANSAC
-        if(verbose){
-        std::cout << "not enough matches for PnP :" << matched_3d_points.size() << std::endl;
+    if (matched_3d_points.size() < 6) {
+        if (verbose) {
+            std::cout << "Not enough matches for PnP: " << matched_3d_points.size() << std::endl;
         }
         return;
     }
 
     // Create camera matrix K
     cv::Mat K = (cv::Mat_<double>(3,3) <<
-    focal_length, 0, principal_point.x,
-    0, focal_length, principal_point.y,
-    0, 0, 1);
+        focal_length, 0, principal_point.x,
+        0, focal_length, principal_point.y,
+        0, 0, 1);
 
-    // Initialize PnP parameters
-    cv::Mat rvec, tvec;
-    cv::Mat inlier_mask;
-    cv::Mat dist_coeffs = cv::Mat::zeros(4, 1, CV_64F);  // Assuming no distortion
+    cv::Mat rvec, tvec, inlier_mask;
+    cv::Mat dist_coeffs = cv::Mat::zeros(4, 1, CV_64F);
 
-    // Run PnP RANSAC
     bool success = cv::solvePnPRansac(
         matched_3d_points,
         matched_2d_points,
@@ -262,39 +244,36 @@ void PoseEstimation::PnP(const cv::Mat& left_image,
         dist_coeffs,
         rvec,
         tvec,
-        false,      // useExtrinsicGuess
-        100,        // iterationsCount
-        8.0,        // reprojectionError threshold
-        0.99,       // confidence
+        false,
+        400,
+        1.0,
+        0.99,
         inlier_mask,
-        cv::SOLVEPNP_P3P
+        cv::SOLVEPNP_EPNP
     );
 
     if (success) {
-        // Convert rotation vector to matrix
         cv::Mat R;
         cv::Rodrigues(rvec, R);
 
-        // Calculate statistics
         int inlier_count = cv::countNonZero(inlier_mask);
         double points3d_percentage = 100.0 * matched_3d_points.size() / points3d.size();
         double inlier_percentage = 100.0 * inlier_count / matched_3d_points.size();
         double final_percentage = 100.0 * inlier_count / points3d.size();
 
-        // Update class members with results
-        this->R = R.t();  // Transpose of rotation matrix is its inverse
-        this->t = -R.t() * tvec;  // Transform translation accordingly
-        // Print statistics
-        if(verbose){
-        std::cout << "PnP RANSAC stats:" << std::endl;
-        std::cout << "3D points used: " << points3d_percentage << "%" << std::endl;
-        std::cout << "Inlier ratio: " << inlier_percentage << "%" << std::endl;
-        std::cout << "Final percentage: " << final_percentage << "%" << std::endl;
+        this->R = R.t();
+        this->t = -R.t() * tvec;
+
+        if (verbose) {
+            std::cout << "PnP RANSAC stats:" << std::endl;
+            std::cout << "3D points used: " << points3d_percentage << "%" << std::endl;
+            std::cout << "Inlier ratio: " << inlier_percentage << "%" << std::endl;
+            std::cout << "Final percentage: " << final_percentage << "%" << std::endl;
         }
     }
     else {
-        if(verbose){
-        std::cout << "PnP RANSAC failed:" << std::endl;
+        if (verbose) {
+            std::cout << "PnP RANSAC failed" << std::endl;
         }
     }
 }

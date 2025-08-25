@@ -1,8 +1,11 @@
+#include <sstream>
+#include <fstream>
 #include <opencv2/opencv.hpp>
 #include <iostream>
 #include <string>
 #include <iomanip>
 #include <fstream>
+#include <map>
 #include "types.hpp"
 #include "feature_detector.hpp"
 #include "pose_estimation.hpp"
@@ -19,13 +22,30 @@ cv::Point3f poseToPoint3f(const Pose &pose)
     return position;
 }
 
-int main()
-{
+int main(){
+
+    // Load KITTI ground truth trajectory
+    std::vector<cv::Point3f> gt_trajectory;
+    std::ifstream gt_file("Datasets/kitti/poses/05.txt");
+    if (gt_file.is_open()) {
+        std::string line;
+        while (std::getline(gt_file, line)) {
+            std::istringstream iss(line);
+            double m[12];
+            for (int i = 0; i < 12; ++i) iss >> m[i];
+            // Translation is last column (m[3], m[7], m[11])
+            gt_trajectory.emplace_back(m[3], m[7], m[11]);
+        }
+        gt_file.close();
+        std::cout << "Loaded KITTI ground truth poses: " << gt_trajectory.size() << std::endl;
+    } else {
+        std::cout << "Could not open ground truth file!" << std::endl;
+    }
     std::cout << "OpenCV version: " << CV_VERSION << std::endl;
 
-    // INPUT
+    // INPUT PARAMETERS
     bool verbose = false;
-    const int KEYFRAME_INTERVAL = 3;
+    const int KEYFRAME_INTERVAL = 2;
 
     // Create objects
     PoseEstimation pose_estimation;
@@ -35,12 +55,10 @@ int main()
     visualizer.initializeWindows();
 
     // Variables to store reference frame data
-    cv::Mat reference_image; // Store reference image
+    cv::Mat reference_image;
     std::vector<cv::Point3f> reference_points3d;
     std::vector<cv::KeyPoint> reference_left_kps, reference_right_kps;
     std::vector<cv::DMatch> reference_matches;
-
-    
 
     // Initialize vectors for current frame
     std::vector<cv::Point3f> points3d;
@@ -49,13 +67,12 @@ int main()
     std::vector<cv::KeyPoint> left_keypoints, right_keypoints;
     std::vector<cv::DMatch> matches;
 
-    // Store trajectory of right camera
+    // Store trajectory of camera
     std::vector<Pose> trajectory;
-    std::vector<cv::Point3f> trajectory_points; // For visualization
+    std::vector<cv::Point3f> trajectory_points;
+    
 
-    // Initialize outside off main loop
-
-    // Load stereo image pair
+    // Load initial stereo image pair
     std::stringstream ss_left, ss_right;
     ss_left << "Datasets/kitti/05/image_0/"
             << std::setfill('0') << std::setw(6) << 0 << ".png";
@@ -67,8 +84,11 @@ int main()
 
     if (left_image.empty() || right_image.empty())
     {
-        std::cout << "Error: Could not load images" << std::endl;
+        std::cout << "Error: Could not load initial images" << std::endl;
+        return -1;
     }
+
+    // Initialize 3D points
     pose_estimation.initialize3D(left_image, right_image, points3d, points_3d_descriptors, points_3d_valid_indices,
                                  left_keypoints, right_keypoints, matches, verbose);
 
@@ -77,41 +97,38 @@ int main()
 
     if (verbose)
     {
-        std::cout << "Initialized with "
-                  << points3d.size() << " 3D points" << std::endl;
+        std::cout << "Initialized with " << points3d.size() << " 3D points" << std::endl;
         reference_left_kps = left_keypoints;
-        std::cout << "Initialized with "
-                  << left_keypoints.size() << " left_keypoints " << std::endl;
         reference_right_kps = right_keypoints;
-        std::cout << "Initialized with "
-                  << right_keypoints.size() << " right_keypoints " << std::endl;
     }
-    // Main loop
+
+    // Main processing loop
     for (int i = 1; i < 5000; i++)
     {
         // Load stereo image pair
-        std::stringstream ss_left, ss_right;
+        ss_left.str(""); ss_left.clear();
+        ss_right.str(""); ss_right.clear();
         ss_left << "Datasets/kitti/05/image_0/"
                 << std::setfill('0') << std::setw(6) << i << ".png";
         ss_right << "Datasets/kitti/05/image_1/"
                  << std::setfill('0') << std::setw(6) << i << ".png";
 
-        cv::Mat left_image = cv::imread(ss_left.str());
-        cv::Mat right_image = cv::imread(ss_right.str());
+        left_image = cv::imread(ss_left.str());
+        right_image = cv::imread(ss_right.str());
 
         if (left_image.empty() || right_image.empty())
         {
-            std::cout << "Error: Could not load images" << std::endl;
+            std::cout << "Error: Could not load images for frame " << i << std::endl;
             continue;
         }
 
-        // Every 5 frames, perform new 3D reconstruction
+        // Process keyframes
         if (i % KEYFRAME_INTERVAL == 0)
         {
-
             // Calculate current pose using PnP
             pose_estimation.PnP(left_image, points3d, points_3d_descriptors, points_3d_valid_indices, verbose);
 
+            // Get current pose and store in trajectory
             Pose current_pose;
             pose_estimation.getCurrentPose(current_pose.R, current_pose.t);
             trajectory.push_back(current_pose);
@@ -128,19 +145,12 @@ int main()
                 std::cout << "Frame " << i << ": New reference frame with "
                           << points3d.size() << " 3D points" << std::endl;
                 reference_left_kps = left_keypoints;
-                std::cout << "Frame " << i << ": New reference frame with "
-                          << left_keypoints.size() << " left_keypoints " << std::endl;
                 reference_right_kps = right_keypoints;
-                std::cout << "Frame " << i << ": New reference frame with "
-                          << right_keypoints.size() << " right_keypoints " << std::endl;
-                std::cout << "Frame " << i << ": New reference frame with "
-                          << points3d.size() << " 3D points" << std::endl;
             }
         }
         else
         {
-
-            // run PnP
+            // Run PnP for non-keyframes
             pose_estimation.PnP(left_image, points3d, points_3d_descriptors, points_3d_valid_indices, verbose);
 
             Pose current_pose;
@@ -150,31 +160,25 @@ int main()
 
             if (verbose)
             {
-                // Print current pose
                 std::cout << "Frame " << i << " pose:" << std::endl;
-                std::cout << "R = " << std::endl
-                          << current_pose.R << std::endl;
+                std::cout << "R = " << std::endl << current_pose.R << std::endl;
                 std::cout << "t = " << current_pose.t.t() << std::endl;
             }
         }
 
         // Show visualizations
+        visualizer.showGroundTruthTrajectory(gt_trajectory);
         visualizer.showStereoMatches(left_image, right_image,
                                      left_keypoints, right_keypoints,
                                      matches);
-
         visualizer.updatePointCloud(points3d, trajectory_points);
 
-        // Wait for key press to continue
-        //char key = cv::waitKey(0);
-        //if (key == 'q' || key == 'Q' || visualizer.isWindowClosed())
-        //{
-        //    break;
-        //}
+        // Wait for first frame
         if (i == 1) {
-            cv::waitKey(0); // Wait indefinitely for the first frame
+            cv::waitKey(0);
         }
     }
+    
     visualizer.cleanup();
     return 0;
 }

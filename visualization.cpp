@@ -1,4 +1,14 @@
 #include "visualization.hpp"
+#include <vector>
+
+void Visualization::showGroundTruthTrajectory(const std::vector<cv::Point3f>& gt_trajectory) {
+    if (!gt_trajectory.empty()) {
+        cv::viz::WPolyLine gt_poly(gt_trajectory, cv::viz::Color::green());
+        gt_poly.setRenderingProperty(cv::viz::LINE_WIDTH, 3.0);
+        viz_window.showWidget("GT_Trajectory", gt_poly);
+    }
+}
+#include "visualization.hpp"
 
 Visualization::Visualization(const std::string& window_name)
     : window_name(window_name),
@@ -11,15 +21,15 @@ void Visualization::initializeWindows() {
     if (!is_initialized) {
         viz_window.setBackgroundColor(cv::viz::Color::white());
         viz_window.showWidget("Coordinate System", cv::viz::WCoordinateSystem());
-        // Set initial camera pose: y = -20, looking down (bird's-eye view)
-        cv::Affine3d cam_pose;
-        // Camera at (0, -20, 0), looking at (0, 0, 0), up = (0, 0, 1)
-        cv::Vec3d cam_pos(0.0, -1200.0, 0.0);
-        cv::Vec3d cam_focal(0.0, 0.0, 0.0);
-        cv::Vec3d cam_y_dir(0.0, 0.0, -1.0);
-        cam_pose = cv::viz::makeCameraPose(cam_pos, cam_focal, cam_y_dir);
-        viz_window.setViewerPose(cam_pose);
-        is_initialized = true;
+    // Set initial camera pose: y = -20, looking slightly down (not straight down)
+    cv::Affine3d cam_pose;
+    // Camera at (0, -700, -400), looking at (0, 0, 0), up = (0, 0.5, 1.0)
+    cv::Vec3d cam_pos(0.0, -1000.0, 150.0);
+    cv::Vec3d cam_focal(0.0, 0.0, 150.0);
+    cv::Vec3d cam_up(0.0, 0.0, -1.0); // Less downward tilt, more up
+    cam_pose = cv::viz::makeCameraPose(cam_pos, cam_focal, cam_up);
+    viz_window.setViewerPose(cam_pose);
+    is_initialized = true;
     }
 }
 

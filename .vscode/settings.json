@@ -1,0 +1,11 @@
+{
+    "files.associations": {
+        "*.usr": "FortranFixedForm",
+        "*.par": "FortranFixedForm",
+        "__hash_table": "cpp",
+        "string": "cpp",
+        "unordered_map": "cpp",
+        "vector": "cpp",
+        "deque": "cpp"
+    }
+}
