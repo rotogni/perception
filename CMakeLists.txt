@@ -11,13 +11,17 @@ set(OpenCV_DIR "/opt/homebrew/Cellar/opencv/4.11.0_1/lib/cmake/opencv4")
 find_package(OpenCV REQUIRED)
 
 # Include OpenCV headers
+include_directories(include, Datasets)
+
 include_directories(${OpenCV_INCLUDE_DIRS})
 
 # Add executable
 add_executable(
     Perception
-    feature_detector.cpp 
-    main.cpp
+    src/feature_detector.cpp
+    src/main.cpp
+    src/visualization.cpp
+    src/pose_estimation.cpp
 )
 
 # Link OpenCV libraries

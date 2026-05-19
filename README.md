@@ -4,7 +4,7 @@ This project implements a stereo visual odometry pipeline for estimating the tra
 
 Screencast real time running on Apple MacBook Pro 13" M2 Max:
 
-[![IMAGE ALT TEXT HERE](https://img.youtube.com/vi/nvk2orbobzM/0.jpg)](https://www.youtube.com/watch?v=nvk2orbobzM)
+<img src="stereo_vo_10x.gif" alt="pic" width="720"/>
 
 ## Overview
 
@@ -37,20 +37,14 @@ The main program (`main.cpp`) processes stereo image sequences to:
 ## Usage
 
 ### Compile
-Compile `main.cpp` and dependencies using:
-
 ```bash
-clang++ main.cpp pose_estimation.cpp visualization.cpp -o main -std=c++17 \
-  -I/opt/homebrew/Cellar/opencv/4.11.0_1/include/opencv4 \
-  -L/opt/homebrew/Cellar/opencv/4.11.0_1/lib \
-  -lopencv_core -lopencv_highgui -lopencv_imgproc -lopencv_imgcodecs \
-  -lopencv_features2d -lopencv_calib3d -lopencv_viz
+cd build
+cmake .. && make
 ```
-
 ### Run
 
 ```bash
-./main
+./build/Perception
 ```
 
 ## Datasets

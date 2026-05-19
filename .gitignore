@@ -6,3 +6,6 @@
 *.txt
 *.log
 *.obs   
+*.cmake
+build/
+.DS_Store
